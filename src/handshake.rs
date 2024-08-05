@@ -1,9 +1,11 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use anyhow::{Result, Context, anyhow};
-use crate::auth_message::AuthMessage;
-use crate::encryption;
-use crate::key_gen::KeyGen;
+use bytes::BytesMut;
+use crate::messages::ack_message::AckMessage;
+use crate::messages::auth_message::AuthMessage;
+use crate::utils::encryption;
+use crate::utils::key_gen::KeyGen;
 
 pub fn handshake(enode_url : &str) -> Result<()>{
     let (remote_address, remote_public_key) = parse_enode_url(enode_url).
@@ -27,10 +29,16 @@ pub fn handshake(enode_url : &str) -> Result<()>{
     tcp_stream.write_all(&encrypted)?;
     println!("Sent auth message of size {auth_size}");
 
-    // let mut resp: [u8; 128] = [0; 128];
-    let mut resp = Vec::new();
-    tcp_stream.read_to_end(&mut resp)?;
-    println!("Read {} bytes {}", resp.len(), hex::encode(&resp));
+    let mut ack_size_bytes = [0u8; 2];
+    tcp_stream.read(&mut ack_size_bytes).context("failed to read size of ack message")?;
+    let ack_size = u16::from_be_bytes(ack_size_bytes);
+
+    let mut encrypted_ack_bytes = BytesMut::with_capacity(ack_size as usize);
+    tcp_stream.read(&mut encrypted_ack_bytes).context("failed to read ack message")?;
+    println!("Received of ack message of size {ack_size}");
+    let ack_bytes = encryption::decrypt_data(encrypted_ack_bytes, &remote_public_key, &mut key_gen).
+        context("failed to encrypt auth message")?;
+    let _ack_message = AckMessage::decode(&ack_bytes);
 
     Ok(())
 }

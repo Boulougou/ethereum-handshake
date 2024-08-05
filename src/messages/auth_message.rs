@@ -3,7 +3,7 @@ use bytes::BytesMut;
 use rlp::RlpStream;
 use secp256k1::{ecdh, ecdsa};
 
-use crate::key_gen::KeyGen;
+use crate::utils::key_gen::KeyGen;
 
 pub struct AuthMessage {
     sig: ecdsa::RecoverableSignature,

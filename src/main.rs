@@ -1,6 +1,5 @@
-mod auth_message;
-mod encryption;
-mod key_gen;
+mod messages;
+mod utils;
 mod handshake;
 
 use crate::handshake::handshake;

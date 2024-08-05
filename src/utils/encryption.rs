@@ -7,7 +7,7 @@ use hmac::{Hmac, Mac};
 use secp256k1::ecdh;
 use sha2::Digest;
 
-use crate::key_gen::KeyGen;
+use crate::utils::key_gen::KeyGen;
 
 const ECIES_OVERHEAD: usize = secp256k1::constants::UNCOMPRESSED_PUBLIC_KEY_SIZE + 16 /* IV */ + 32 /* MAC */;
 
@@ -44,6 +44,11 @@ pub fn encrypt_data(mut unencrypted : BytesMut, public_key : &secp256k1::PublicK
     output.put_slice(&encrypted);
     output.put_slice(&tag);
     return Ok(output.freeze())
+}
+
+pub fn decrypt_data(mut _encrypted : BytesMut, _public_key : &secp256k1::PublicKey,
+                    _key_gen : &mut KeyGen) -> Result<Bytes> {
+    todo!()
 }
 
 fn hmac_sha256(key: &[u8], input: &[&[u8]], auth_size: &[u8]) -> Result<[u8; 32]> {
