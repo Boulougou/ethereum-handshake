@@ -14,3 +14,5 @@ ctr = "0.9.2"
 aes = "0.8.4"
 hmac = "0.12.1"
 anyhow = "1.0.86"
+tokio = { version = "1.39.2", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+futures = "0.3.30"

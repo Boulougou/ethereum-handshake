@@ -2,6 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use rlp::Rlp;
 
+#[derive(Debug)]
 pub struct AckMessage {
     ephemeral_public_key: secp256k1::PublicKey,
     recipient_nonce: [u8; 32],

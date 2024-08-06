@@ -28,6 +28,10 @@ impl KeyGen {
         secp256k1::SecretKey::new(&mut self.rng)
     }
 
+    pub fn public_from_secret_key(&mut self, secret_key : &secp256k1::SecretKey) -> secp256k1::PublicKey {
+        secp256k1::PublicKey::from_secret_key(&mut self.context, secret_key)
+    }
+
     pub fn sign_data(&mut self, data : &[u8], key : &secp256k1::SecretKey) -> Result<ecdsa::RecoverableSignature> {
         let message = secp256k1::Message::from_digest_slice(data)?;
         Ok(self.context.sign_ecdsa_recoverable(&message, key))
