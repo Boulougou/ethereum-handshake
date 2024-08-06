@@ -14,10 +14,10 @@ pub struct AuthMessage {
 }
 
 impl AuthMessage {
-    pub fn new(key_gen: &mut KeyGen, remote_public_key: &secp256k1::PublicKey) -> Result<AuthMessage> {
-        // Create initiator private/public key pair
-        let (initiator_secret_key, initiator_public_key) = key_gen.generate_key_pair();
-
+    pub fn new(key_gen: &mut KeyGen,
+               initiator_secret_key: &secp256k1::SecretKey,
+               initiator_public_key: & secp256k1::PublicKey,
+               remote_public_key: & secp256k1::PublicKey) -> Result<AuthMessage> {
         // Create ephemeral private key
         let ephemeral_secret_key = key_gen.generate_secret_key();
 
@@ -40,7 +40,7 @@ impl AuthMessage {
 
         let auth_message = AuthMessage {
             sig,
-            initiator_public_key,
+            initiator_public_key: *initiator_public_key,
             initiator_nonce,
             auth_vsn: 4,
             padding_size: key_gen.generate_range(100, 300)

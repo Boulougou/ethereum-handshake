@@ -7,7 +7,10 @@ use crate::messages::auth_message::AuthMessage;
 use crate::utils::encryption;
 use crate::utils::key_gen::KeyGen;
 
-pub fn handshake(enode_url : &str) -> Result<()>{
+pub fn handshake(enode_url : &str,
+                 initiator_secret_key: &secp256k1::SecretKey,
+                 initiator_public_key: &secp256k1::PublicKey,
+                 mut key_gen: &mut KeyGen) -> Result<()>{
     let (remote_address, remote_public_key) = parse_enode_url(enode_url).
         with_context(|| format!("failed to parse url {enode_url}"))?;
 
@@ -16,8 +19,10 @@ pub fn handshake(enode_url : &str) -> Result<()>{
 
     println!("Connected to {}!", tcp_stream.peer_addr().unwrap());
 
-    let mut key_gen = KeyGen::new();
-    let auth_message = AuthMessage::new(&mut key_gen, &remote_public_key).
+    let auth_message = AuthMessage::new(&mut key_gen,
+                                        &initiator_secret_key,
+                                        &initiator_public_key,
+                                        &remote_public_key).
         context("failed to create auth message")?;
 
     let encoded_message = auth_message.encode();
@@ -34,10 +39,11 @@ pub fn handshake(enode_url : &str) -> Result<()>{
     let ack_size = u16::from_be_bytes(ack_size_bytes);
 
     let mut encrypted_ack_bytes = BytesMut::with_capacity(ack_size as usize);
-    tcp_stream.read(&mut encrypted_ack_bytes).context("failed to read ack message")?;
-    println!("Received of ack message of size {ack_size}");
-    let ack_bytes = encryption::decrypt_data(encrypted_ack_bytes, &remote_public_key, &mut key_gen).
-        context("failed to encrypt auth message")?;
+    encrypted_ack_bytes.resize(ack_size as usize, 0);
+    tcp_stream.read_exact(&mut encrypted_ack_bytes).context("failed to read ack message")?;
+    println!("Received ack message of size {ack_size}");
+    let ack_bytes = encryption::decrypt_data(encrypted_ack_bytes, &initiator_secret_key, &mut key_gen).
+        context("failed to decrypt auth message")?;
     let _ack_message = AckMessage::decode(&ack_bytes);
 
     Ok(())
