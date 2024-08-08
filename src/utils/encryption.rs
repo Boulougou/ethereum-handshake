@@ -123,3 +123,24 @@ fn to_array32(slice: &[u8]) -> [u8; 32] {
     array
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encrypt_and_decrypt_data() {
+        let mut key_gen = KeyGen::new();
+        let (secret_key, public_key) = key_gen.generate_key_pair();
+
+        let data = Bytes::copy_from_slice(&[3u8, 6, 34, 244, 0, 12, 43]);
+        let encrypted_result = encrypt_data(
+            BytesMut::from(data.clone()), &public_key, &mut key_gen);
+        assert!(encrypted_result.is_ok(), "failed to encrypt data {:?}", encrypted_result.unwrap_err());
+
+        let decrypted_result = decrypt_data(
+            BytesMut::from(encrypted_result.unwrap()), &secret_key, &mut key_gen);
+        assert!(decrypted_result.is_ok(), "failed to decrypt data {:?}", decrypted_result.unwrap_err());
+
+        assert_eq!(decrypted_result.unwrap(), Bytes::copy_from_slice(&data))
+    }
+}
