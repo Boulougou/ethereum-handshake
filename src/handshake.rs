@@ -12,14 +12,18 @@ pub async fn handshake(enode_url : &str,
     let (remote_address, remote_public_key) = parse_enode_url(enode_url).
         with_context(|| format!("failed to parse url {enode_url}"))?;
 
+    let log_prefix = pretty_enode(enode_url);
+
     let mut key_gen = KeyGen::new();
     let mut tcp_stream = TcpStream::connect(remote_address).await.
         context("failed to connect to remote node")?;
-
-    println!("Connected to {}!", tcp_stream.peer_addr().unwrap());
+    println!("{log_prefix} Connected to {}", tcp_stream.peer_addr().unwrap());
 
     send_auth_message(&initiator_secret_key, &remote_public_key, &mut tcp_stream, &mut key_gen).await?;
+    println!("{log_prefix} Sent Auth message");
+
     let _ack_message = receive_ack_message(&initiator_secret_key, &mut tcp_stream, &mut key_gen).await?;
+    println!("{log_prefix} Received Ack message");
 
     Ok(())
 }
@@ -59,7 +63,6 @@ async fn send_auth_message(initiator_secret_key: &secp256k1::SecretKey,
     let auth_size: u16 = encrypted.len() as u16;
     tcp_stream.write_all(&auth_size.to_be_bytes()).await?;
     tcp_stream.write_all(&encrypted).await?;
-    println!("Sent auth message of size {auth_size}");
     Ok(())
 }
 
@@ -73,11 +76,15 @@ async fn receive_ack_message(initiator_secret_key: &secp256k1::SecretKey,
     let mut encrypted_ack_bytes = BytesMut::with_capacity(ack_size as usize);
     encrypted_ack_bytes.resize(ack_size as usize, 0);
     tcp_stream.read_exact(&mut encrypted_ack_bytes).await.context("failed to read ack message")?;
-    println!("Received ack message of size {ack_size}");
 
     let ack_bytes = encryption::decrypt_data(encrypted_ack_bytes, &initiator_secret_key, &mut key_gen).
         context("failed to decrypt auth message")?;
 
     let ack_message = AckMessage::decode(&ack_bytes).context("failed to decode ack message")?;
     Ok(ack_message)
+}
+
+pub fn pretty_enode(enode_url: &str) -> String {
+    let maybe_parts = enode_url.split_at_checked(14);
+    maybe_parts.map(|(l, _r)| format!("[{l}]")).unwrap_or(String::from("enode://INVALID"))
 }

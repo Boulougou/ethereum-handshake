@@ -3,7 +3,7 @@ use std::env;
 use futures::future;
 use tokio::task::JoinHandle;
 
-use crate::handshake::handshake;
+use crate::handshake::{handshake, pretty_enode};
 use crate::utils::key_gen::KeyGen;
 
 mod messages;
@@ -45,10 +45,11 @@ fn spawn_handshake_tasks(enodes: Vec<String>, initiator_secret_key: secp256k1::S
 
 async fn trigger_handshake(enode_url : String,
                            initiator_secret_key: secp256k1::SecretKey) {
+    println!("{} Starting handshake", pretty_enode(&enode_url));
     let result = handshake(&enode_url, &initiator_secret_key).await;
     match result {
-        Ok(_) => println!("Handshake completed for {enode_url}!!!"),
-        Err(e) => println!("Handshake failed for {enode_url}: {:?}", e)
+        Ok(_) => println!("{} ** Handshake completed ***", pretty_enode(&enode_url)),
+        Err(e) => eprintln!("{} !!! Handshake failed: {:?} !!!",  pretty_enode(&enode_url), e)
     }
 }
 
@@ -57,7 +58,7 @@ async fn join_handshake_tasks(futures: Vec<JoinHandle<()>>) {
 
     let any_failure = results.iter().any(|r| r.is_err());
     if any_failure {
-        println!("Could not join all tasks");
+        eprintln!("Could not join all tasks");
         std::process::exit(-1);
     }
 }
