@@ -4,18 +4,19 @@ use futures::future;
 use tokio::task::JoinHandle;
 
 use crate::handshake::{handshake, pretty_enode};
-use crate::utils::key_gen::KeyGen;
+use crate::utils::KeyGen;
 
-mod messages;
+mod auth;
 mod utils;
 mod handshake;
+mod frame;
 
 #[tokio::main]
 async fn main() {
     let enodes = parse_enodes_from_args();
-    let initiator_secret_key = generate_secret_key();
+    let (initiator_secret_key, initiator_public_key) = generate_key_pair();
 
-    let futures = spawn_handshake_tasks(enodes, initiator_secret_key);
+    let futures = spawn_handshake_tasks(enodes, initiator_secret_key, initiator_public_key);
     join_handshake_tasks(futures).await;
 }
 
@@ -30,23 +31,26 @@ fn parse_enodes_from_args() -> Vec<String> {
     enodes
 }
 
-fn generate_secret_key() -> secp256k1::SecretKey {
+fn generate_key_pair() -> (secp256k1::SecretKey, secp256k1::PublicKey) {
     let mut key_gen = KeyGen::new();
-    key_gen.generate_secret_key()
+    key_gen.generate_key_pair()
 }
 
-fn spawn_handshake_tasks(enodes: Vec<String>, initiator_secret_key: secp256k1::SecretKey) -> Vec<JoinHandle<()>> {
+fn spawn_handshake_tasks(enodes: Vec<String>,
+                         initiator_secret_key: secp256k1::SecretKey,
+                         initiator_public_key: secp256k1::PublicKey) -> Vec<JoinHandle<()>> {
     enodes.
         into_iter().
         map(|enode| tokio::spawn(
-            trigger_handshake(enode, initiator_secret_key))).
+            trigger_handshake(enode, initiator_secret_key, initiator_public_key))).
         collect()
 }
 
 async fn trigger_handshake(enode_url : String,
-                           initiator_secret_key: secp256k1::SecretKey) {
+                           initiator_secret_key: secp256k1::SecretKey,
+                           initiator_public_key: secp256k1::PublicKey) {
     println!("{} Starting handshake", pretty_enode(&enode_url));
-    let result = handshake(&enode_url, &initiator_secret_key).await;
+    let result = handshake(&enode_url, &initiator_secret_key, &initiator_public_key).await;
     match result {
         Ok(_) => println!("{} ** Handshake completed ***", pretty_enode(&enode_url)),
         Err(e) => eprintln!("{} !!! Handshake failed: {:?} !!!",  pretty_enode(&enode_url), e)

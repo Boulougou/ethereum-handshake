@@ -7,7 +7,7 @@ use hmac::{Hmac, Mac};
 use secp256k1::ecdh;
 use sha2::Digest;
 
-use crate::utils::key_gen::KeyGen;
+use crate::utils::{KeyGen, to_array};
 
 const IV_SIZE: usize = 16;
 const MAC_SIZE: usize = 32;
@@ -103,24 +103,18 @@ fn hmac_sha256(key: &[u8], input: &[&[u8]], auth_size: &[u8]) -> Result<[u8; MAC
     hmac.update(auth_size);
     let hash = hmac.finalize().into_bytes();
 
-    Ok(to_array32(&hash))
+    Ok(to_array(&hash))
 }
 
-fn ecdh_x(public_key: &secp256k1::PublicKey, secret_key: &secp256k1::SecretKey) -> [u8; 32] {
+pub fn ecdh_x(public_key: &secp256k1::PublicKey, secret_key: &secp256k1::SecretKey) -> [u8; 32] {
     let slice = &ecdh::shared_secret_point(public_key, secret_key)[..32];
 
-    to_array32(slice)
+    to_array(slice)
 }
 
 fn kdf(secret: &[u8; 32], s1: &[u8], dest: &mut [u8]) -> Result<()> {
     concat_kdf::derive_key_into::<sha2::Sha256>(secret.as_slice(), s1, dest).
         map_err(|e| anyhow!("concat_kdf error {e}"))
-}
-
-fn to_array32(slice: &[u8]) -> [u8; 32] {
-    let mut array = [0u8; 32];
-    slice.iter().enumerate().for_each(|(i, x)| array[i] = *x);
-    array
 }
 
 #[cfg(test)]

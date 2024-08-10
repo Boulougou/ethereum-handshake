@@ -2,12 +2,13 @@ use anyhow::{anyhow, Context, Result};
 use bytes::Bytes;
 use rlp::Rlp;
 use secp256k1::PublicKey;
+use crate::utils::to_array;
 
 #[derive(Debug)]
 pub struct AckMessage {
-    ephemeral_public_key: secp256k1::PublicKey,
-    recipient_nonce: [u8; 32],
-    ack_vsn: u8,
+    pub remote_ephemeral_public_key: secp256k1::PublicKey,
+    pub remote_nonce: [u8; 32],
+    pub _ack_vsn: u8,
 }
 
 impl AckMessage {
@@ -19,9 +20,9 @@ impl AckMessage {
         let version = Self::decode_version(rlp_msg)?;
 
         Ok(AckMessage {
-            ephemeral_public_key: public_key,
-            recipient_nonce: to_array32(&nonce),
-            ack_vsn : version
+            remote_ephemeral_public_key: public_key,
+            remote_nonce: to_array(&nonce),
+            _ack_vsn : version
         })
     }
 
@@ -50,10 +51,4 @@ impl AckMessage {
 
         Ok(public_key)
     }
-}
-
-fn to_array32(slice: &[u8]) -> [u8; 32] {
-    let mut array = [0u8; 32];
-    slice.iter().enumerate().for_each(|(i, x)| array[i] = *x);
-    array
 }

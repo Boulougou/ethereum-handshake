@@ -1,2 +1,5 @@
-pub mod encryption;
-pub mod key_gen;
+mod key_gen;
+mod utils;
+
+pub use utils::*;
+pub use key_gen::*;

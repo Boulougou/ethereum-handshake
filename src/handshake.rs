@@ -1,29 +1,59 @@
-use tokio::net::TcpStream;
+use anyhow::{anyhow, Context, Result};
+use bytes::{BytesMut, Bytes};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use anyhow::{Result, Context, anyhow};
-use bytes::BytesMut;
-use crate::messages::ack_message::AckMessage;
-use crate::messages::auth_message::AuthMessage;
-use crate::utils::encryption;
-use crate::utils::key_gen::KeyGen;
+use tokio::net::TcpStream;
+use crate::frame::DisconnectMessage;
+use crate::frame::FrameContext;
+use crate::frame::HelloMessage;
+use crate::auth::{AckMessage, encryption};
+use crate::auth::AuthMessage;
+use crate::utils::KeyGen;
 
 pub async fn handshake(enode_url : &str,
-                 initiator_secret_key: &secp256k1::SecretKey) -> Result<()>{
+                       initiator_secret_key: &secp256k1::SecretKey,
+                       initiator_public_key: &secp256k1::PublicKey) -> Result<()>{
     let (remote_address, remote_public_key) = parse_enode_url(enode_url).
         with_context(|| format!("failed to parse url {enode_url}"))?;
 
     let log_prefix = pretty_enode(enode_url);
 
     let mut key_gen = KeyGen::new();
+    let ephemeral_secret_key = key_gen.generate_secret_key();
+    let mut initiator_nonce = [0u8; 32];
+    key_gen.fill_random_bytes(&mut initiator_nonce).context("failed to initialize initiator_nonce")?;
+
     let mut tcp_stream = TcpStream::connect(remote_address).await.
         context("failed to connect to remote node")?;
     println!("{log_prefix} Connected to {}", tcp_stream.peer_addr().unwrap());
 
-    send_auth_message(&initiator_secret_key, &remote_public_key, &mut tcp_stream, &mut key_gen).await?;
+    let auth_bytes = send_auth_message(initiator_secret_key, initiator_public_key,
+                                       initiator_nonce, &ephemeral_secret_key,
+                      &remote_public_key, &mut tcp_stream, &mut key_gen).await?;
     println!("{log_prefix} Sent Auth message");
 
-    let _ack_message = receive_ack_message(&initiator_secret_key, &mut tcp_stream, &mut key_gen).await?;
+    let (ack_bytes, ack_message) = receive_ack_message(&initiator_secret_key, &mut tcp_stream, &mut key_gen).await?;
     println!("{log_prefix} Received Ack message");
+
+    let mut frame_context = FrameContext::new(&ephemeral_secret_key,
+                                           &ack_message.remote_ephemeral_public_key,
+                                           initiator_nonce,
+                                           ack_message.remote_nonce,
+                                           &auth_bytes, &ack_bytes).
+        context("failed to initialize frame context")?;
+    println!("{log_prefix} Frame context was initialized");
+
+    let hello_message = HelloMessage::new(&initiator_public_key);
+    frame_context.send_frame(&mut tcp_stream, hello_message.encode().into()).await.
+        context("failed to send Hello message")?;
+    println!("{log_prefix} Sent {:?}", hello_message);
+
+    let incoming_data = frame_context.receive_frame(&mut tcp_stream).await.
+        context("failed to receive hello message")?;
+    println!("{log_prefix} Received incoming frame");
+
+    let incoming_hello = try_decoding_hello(&incoming_data)?;
+
+    println!("{log_prefix} Received valid {:?}", incoming_hello);
 
     Ok(())
 }
@@ -54,11 +84,17 @@ fn parse_enode_url(enode_url: &str) -> Result<(&str, secp256k1::PublicKey)> {
 }
 
 async fn send_auth_message(initiator_secret_key: &secp256k1::SecretKey,
+                           initiator_public_key: &secp256k1::PublicKey,
+                           initiator_nonce : [u8; 32],
+                           ephemeral_secret_key: &secp256k1::SecretKey,
                            remote_public_key: &secp256k1::PublicKey,
                            tcp_stream: &mut TcpStream,
-                           mut key_gen: &mut KeyGen) -> Result<()> {
+                           mut key_gen: &mut KeyGen) -> Result<Bytes> {
     let auth_message = AuthMessage::new(&mut key_gen,
-                                        &initiator_secret_key,
+                                        initiator_secret_key,
+                                        initiator_public_key,
+                                        initiator_nonce,
+                                        &ephemeral_secret_key,
                                         &remote_public_key).
         context("failed to create auth message")?;
 
@@ -67,27 +103,52 @@ async fn send_auth_message(initiator_secret_key: &secp256k1::SecretKey,
         context("failed to encrypt auth message")?;
 
     let auth_size: u16 = encrypted.len() as u16;
-    tcp_stream.write_all(&auth_size.to_be_bytes()).await?;
-    tcp_stream.write_all(&encrypted).await?;
-    Ok(())
+    let mut data = BytesMut::with_capacity(2 + auth_size as usize);
+    data.resize(data.capacity(), 0);
+
+    let mut payload = data.split_off(2);
+    payload.copy_from_slice(&encrypted);
+    data.copy_from_slice(&auth_size.to_be_bytes());
+    data.unsplit(payload);
+
+    tcp_stream.write_all(&data).await.context("failed to write auth message")?;
+
+    Ok(data.freeze())
 }
 
 async fn receive_ack_message(initiator_secret_key: &secp256k1::SecretKey,
                              tcp_stream: &mut TcpStream,
-                             mut key_gen: &mut KeyGen) -> Result<AckMessage> {
+                             mut key_gen: &mut KeyGen) -> Result<(Bytes, AckMessage)> {
     let mut ack_size_bytes = [0u8; 2];
     tcp_stream.read_exact(&mut ack_size_bytes).await.context("failed to read size of ack message")?;
     let ack_size = u16::from_be_bytes(ack_size_bytes);
 
-    let mut encrypted_ack_bytes = BytesMut::with_capacity(ack_size as usize);
-    encrypted_ack_bytes.resize(ack_size as usize, 0);
+    let mut data = BytesMut::with_capacity(2 + ack_size as usize);
+    data.resize(data.capacity(), 0);
+    let mut encrypted_ack_bytes = data.split_off(2);
+    data.copy_from_slice(&ack_size_bytes);
+
     tcp_stream.read_exact(&mut encrypted_ack_bytes).await.context("failed to read ack message")?;
 
-    let ack_bytes = encryption::decrypt_data(encrypted_ack_bytes, &initiator_secret_key, &mut key_gen).
+    let ack_bytes = encryption::decrypt_data(encrypted_ack_bytes.clone(), &initiator_secret_key, &mut key_gen).
         context("failed to decrypt auth message")?;
 
     let ack_message = AckMessage::decode(&ack_bytes).context("failed to decode ack message")?;
-    Ok(ack_message)
+    data.unsplit(encrypted_ack_bytes);
+    Ok((data.freeze(), ack_message))
+}
+
+fn try_decoding_hello(incoming_data: &Bytes) -> Result<HelloMessage> {
+    let maybe_incoming_hello = HelloMessage::decode(&incoming_data);
+    if maybe_incoming_hello.is_err() {
+        let maybe_incoming_disconnect = DisconnectMessage::decode(&incoming_data);
+        if maybe_incoming_disconnect.is_ok() {
+            return Err(anyhow!("Received Disconnect instead of Hello, reason for disconnection: {:#02x}",
+                maybe_incoming_disconnect.unwrap().reason));
+        }
+    }
+
+    maybe_incoming_hello
 }
 
 pub fn pretty_enode(enode_url: &str) -> String {

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use bytes::BytesMut;
 use rlp::RlpStream;
-use secp256k1::{ecdh, ecdsa};
+use secp256k1::ecdsa;
 
-use crate::utils::key_gen::KeyGen;
+use crate::auth::encryption::ecdh_x;
+use crate::utils::KeyGen;
 
 #[derive(Debug)]
 pub struct AuthMessage {
@@ -17,20 +18,14 @@ pub struct AuthMessage {
 impl AuthMessage {
     pub fn new(key_gen: &mut KeyGen,
                initiator_secret_key: &secp256k1::SecretKey,
+               initiator_public_key: &secp256k1::PublicKey,
+               initiator_nonce : [u8; 32],
+               ephemeral_secret_key: &secp256k1::SecretKey,
                remote_public_key: & secp256k1::PublicKey) -> Result<AuthMessage> {
-        let initiator_public_key = key_gen.public_from_secret_key(&initiator_secret_key);
-        let ephemeral_secret_key = key_gen.generate_secret_key();
-
-        // Create nonce
-        let mut initiator_nonce = [0u8; 32];
-        key_gen.fill_random_bytes(&mut initiator_nonce).context("failed to initialize initiator_nonce")?;
-
-        // Shared secret
-        let shared_secret = ecdh::SharedSecret::new(&remote_public_key, &initiator_secret_key);
+        let shared_secret = ecdh_x(&remote_public_key, &initiator_secret_key);
 
         // Sig
-        let shared_secret_bytes = shared_secret.secret_bytes();
-        let xor_to_sign : Vec<u8> = shared_secret_bytes.
+        let xor_to_sign : Vec<u8> = shared_secret.
             iter().
             enumerate().
             map(|(i, b)| b ^ initiator_nonce[i]).
@@ -40,7 +35,7 @@ impl AuthMessage {
 
         let auth_message = AuthMessage {
             sig,
-            initiator_public_key,
+            initiator_public_key: *initiator_public_key,
             initiator_nonce,
             auth_vsn: 4,
             padding_size: key_gen.generate_range(100, 300)
