@@ -7,7 +7,7 @@ edition = "2021"
 # dependencies for error handling
 anyhow = "1.0.86"
 # dependencies for non-blocking io
-tokio = { version = "1.39.2", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+tokio = { version = "1.39.2", features = ["rt-multi-thread", "macros", "net", "io-util", "time"] }
 futures = "0.3.30"
 # depepdencies needed for implementing RLPx handshake
 rlp = "0.5.2"

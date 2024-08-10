@@ -16,7 +16,10 @@ async fn main() {
     let enodes = parse_enodes_from_args();
     let (initiator_secret_key, initiator_public_key) = generate_key_pair();
 
-    let futures = spawn_handshake_tasks(enodes, initiator_secret_key, initiator_public_key);
+    let handshake_time_out = tokio::time::Duration::from_secs(10);
+
+    let futures = spawn_handshake_tasks(enodes, handshake_time_out,
+                                        initiator_secret_key, initiator_public_key);
     join_handshake_tasks(futures).await;
 }
 
@@ -37,23 +40,27 @@ fn generate_key_pair() -> (secp256k1::SecretKey, secp256k1::PublicKey) {
 }
 
 fn spawn_handshake_tasks(enodes: Vec<String>,
+                         handshake_timeout: tokio::time::Duration,
                          initiator_secret_key: secp256k1::SecretKey,
                          initiator_public_key: secp256k1::PublicKey) -> Vec<JoinHandle<()>> {
     enodes.
         into_iter().
         map(|enode| tokio::spawn(
-            trigger_handshake(enode, initiator_secret_key, initiator_public_key))).
+            trigger_handshake(enode, handshake_timeout, initiator_secret_key, initiator_public_key))).
         collect()
 }
 
 async fn trigger_handshake(enode_url : String,
+                           timeout: tokio::time::Duration,
                            initiator_secret_key: secp256k1::SecretKey,
                            initiator_public_key: secp256k1::PublicKey) {
     println!("{} Starting handshake", pretty_enode(&enode_url));
-    let result = handshake(&enode_url, &initiator_secret_key, &initiator_public_key).await;
+    let result = tokio::time::timeout(timeout,
+                                      handshake(&enode_url, &initiator_secret_key, &initiator_public_key)).await;
     match result {
-        Ok(_) => println!("{} ** Handshake completed ***", pretty_enode(&enode_url)),
-        Err(e) => eprintln!("{} !!! Handshake failed: {:?} !!!",  pretty_enode(&enode_url), e)
+        Ok(Ok(_)) => println!("{} ** Handshake completed ***", pretty_enode(&enode_url)),
+        Ok(Err(e)) => eprintln!("{} !!! Handshake failed: {:?} !!!", pretty_enode(&enode_url), e),
+        Err(_) => eprintln!("{} !!! Handshake timed out !!!", pretty_enode(&enode_url))
     }
 }
 
